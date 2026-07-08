@@ -1,5 +1,4 @@
-using LinearAlgebra, Statistics, Distributions 
-using OrdinaryDiffEq
+using LinearAlgebra, Statistics, Distributions
 using SciMLSensitivity
 using Optimization, OptimizationOptimisers, OptimizationOptimJL
 
@@ -11,53 +10,81 @@ Random.seed!(rng, 666)
 ###############  Simulation of Simple Rotation ###############
 ##############################################################
 
-function test_single_rotation()
+function test_single_rotation(;
+    repeat_times = false,
+    use_regularization = true,
+    sensealg = sensealg,
+    regressor_builder = nothing,   # (params, rng) → AbstractRegressor, or nothing for default NN
+)
 
     # Total time simulation
     tspan = [0, 160.0]
     # Number of sample points
-    N_samples = 10
+    N_samples = 100
     # Times where we sample points
-    times_samples = sort(rand(sampler(Uniform(tspan[1], tspan[2])), N_samples))
+    random_times = rand(sampler(Uniform(tspan[1], tspan[2])), N_samples)
+    if repeat_times
+        # We repeat a few ages
+        random_times[end] = random_times[1]
+        random_times[end-1] = random_times[1]
+        random_times[end-2] = random_times[2]
+    end
+    times_samples = sort(random_times)
 
     # Expected maximum angular deviation in one unit of time (degrees)
-    Δω₀ = 1.0   
-    # Angular velocity 
+    Δω₀ = 3.0
+    # Angular velocity
     ω₀ = Δω₀ * π / 180.0
 
     # Create simple example
     X = zeros(3, N_samples)
     X[3, :] .= 1
-    X[1, :] = LinRange(0,1,N_samples)
-    X = X ./ norm.(eachcol(X))' 
+    X[1, :] = LinRange(0, 3, N_samples)
+    X .+= rand(size(X)...)
+    X = X ./ norm.(eachcol(X))'
 
     ##############################################################
     #######################  Training  ###########################
     ##############################################################
 
-    data = SphereData(times=times_samples, directions=X, kappas=nothing, L=nothing)
+    data = SphereData(times = times_samples, directions = X, kappas = nothing, L = nothing)
 
-    regs = [Regularization(order=1, power=1.0, λ=0.1, diff_mode="FD"),  
-            Regularization(order=0, power=2.0, λ=0.001, diff_mode=nothing)]
+    if use_regularization
+        regs = [
+            Regularization(order = 1, power = 1.0, λ = 1e3, diff_mode = FiniteDiff(1e-6)),
+            Regularization(order = 0, power = 2.0, λ = 1e-6, diff_mode = nothing),
+        ]
+    else
+        regs = nothing
+    end
 
-    params = SphereParameters(tmin = tspan[1], tmax = tspan[2], 
-                            reg = regs, 
-                            train_initial_condition = false,
-                            multiple_shooting = false, 
-                            u0 = [0.0, 0.0, -1.0], ωmax = ω₀, reltol = 1e-12, abstol = 1e-12,
-                            niter_ADAM = 20, niter_LBFGS = 10, 
-                            sensealg = GaussAdjoint(autojacvec = ReverseDiffVJP(true))) 
+    # DummyAdjoint returns a random gradient, so LBFGS is meaningless
+    niter_LBFGS = typeof(sensealg) <: SphereUDE.DummyAdjoint ? 0 : 51
 
-    results = train(data, params, rng, nothing)
+    params = SphereParameters(
+        tmin = tspan[1],
+        tmax = tspan[2],
+        reg = regs,
+        train_initial_condition = false,
+        multiple_shooting = false,
+        pretrain = false,
+        u0 = [0.0, 0.0, -1.0],
+        ωmax = ω₀,
+        reltol = 1e-12,
+        abstol = 1e-12,
+        niter_ADAM = 101,
+        niter_LBFGS = niter_LBFGS,
+        verbose_step = 50,
+        sensealg = sensealg,
+    )
+
+    regressor = isnothing(regressor_builder) ? nothing : regressor_builder(params, rng)
+    regressor_type = isnothing(regressor) ? "default NNRegressor" : typeof(regressor)
+    @info "Testing inversion | regressor=$regressor_type | sensealg=$(typeof(sensealg)) | regularization=$use_regularization | repeat_times=$repeat_times"
+    results = train(data, params, rng, nothing, regressor)
 
     @test true
-
+    if !(typeof(sensealg) <: SphereUDE.DummyAdjoint)
+        @test results.losses[end] < 0.70 * results.losses[begin]
+    end
 end
-
-##############################################################
-######################  PyCall Plots #########################
-##############################################################
-
-# plot_sphere(data, results, -20., 125., saveas="examples/double_rotation/" * title * "_sphere.pdf", title="Double rotation") # , matplotlib_rcParams=Dict("font.size"=> 50))
-# plot_L(data, results, saveas="examples/double_rotation/" * title * "_L.pdf", title="Double rotation")
-

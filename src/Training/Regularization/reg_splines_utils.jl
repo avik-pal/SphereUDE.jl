@@ -1,0 +1,54 @@
+export cubic_regularization
+
+"""
+Cubic regularization from Jupp (1987)
+"""
+function cubic_regularization(
+    β::ComponentVector,
+    regressor::NNRegressor,
+    reg::CubicSplinesRegularization,
+    params::AP,
+) where {AP<:AbstractParameters}
+
+    smodel = StatefulLuxLayer{true}(regressor.model, β.θ, regressor.st)
+
+    # Create prediction of solution time series in integration points
+    nodes, weights = quadrature(params.tmin, params.tmax, params.quadrature.n_nodes)
+    u_ = predict(β, params, nodes, regressor)
+
+    if typeof(reg.diff_mode) <: LuxNestedAD
+        # Automatic Differentiation
+
+        if reg.diff_mode.method == "ForwardDiff"
+            Jac = batched_jacobian(
+                smodel,
+                AutoForwardDiff(),
+                reshape(nodes, 1, params.quadrature.n_nodes),
+            )
+        elseif reg.diff_mode.method == "Zygote"
+            Jac = batched_jacobian(
+                smodel,
+                AutoZygote(),
+                reshape(nodes, 1, params.quadrature.n_nodes),
+            )
+        else
+            throw("Method for AD backend no implemented.")
+        end
+
+        L_cross_u = [cross(Jac[:, 1, j], u_[:, j]) for j = 1:params.quadrature.n_nodes]
+
+    elseif typeof(reg.diff_mode) <: FiniteDiff
+        L_ = [central_fdm(τ -> smodel([τ]), t, reg.diff_mode.ϵ) for t in nodes]
+        L_cross_u = [cross(L_[j], u_[:, j]) for j = 1:params.quadrature.n_nodes]
+
+    elseif typeof(reg.diff_mode) <: ComplexStepDifferentiation
+        L_ = [
+            complex_step_differentiation(τ -> smodel([τ]), t, reg.diff_mode.ϵ) for
+            t in nodes
+        ]
+    else
+        throw("Method not implemented.")
+    end
+
+    return reg.λ * sum([weights[j] * norm(L_cross_u[j])^2.0 for j = 1:params.quadrature.n_nodes])
+end

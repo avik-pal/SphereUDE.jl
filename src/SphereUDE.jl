@@ -1,40 +1,71 @@
 __precompile__()
 module SphereUDE
 
-# types
-using Base: @kwdef
-# utils 
-# training 
+# utils
+# training
 using LinearAlgebra, Statistics, Distributions
+using Random
 using FastGaussQuadrature
 using Lux, Zygote, DiffEqFlux
 using ChainRules: @ignore_derivatives
-using OrdinaryDiffEq
-using SciMLSensitivity
-using Optimization, OptimizationOptimisers, OptimizationOptimJL, OptimizationPolyalgorithms
+import ChainRulesCore
+using OrdinaryDiffEqCore, OrdinaryDiffEqTsit5
+using SciMLSensitivity, ForwardDiff
+using Optimization, OptimizationOptimisers, OptimizationOptimJL, LineSearches
+using Optimisers
 using ComponentArrays
-using PyPlot, PyCall
-using PrettyTables
+using Plots
+using PrettyTables, Printf
+using ProgressMeter
+using SciMLBase: NoAD
+using DiffEqBase: AbstractDEAlgorithm
+using MLUtils: DataLoader
+using StaticArrays
 
-# Testing double-differentiation
-# using BatchedRoutines
+# Data Types
+include("DiffEq/adjoint.jl")
+include("Training/Regularization/Quadrature.jl")
+include("Parameters/SphereParameters.jl")
+include("Data/SphereData.jl")
+include("Data/data_utils.jl")
 
-# Debugging
-using Infiltrator
+# Regressor interface — must come before DiffEq which depends on AbstractRegressor
+include("Training/ML/Regressor.jl")
+include("Training/ML/NN_utils.jl")
+include("Training/ML/NNRegressor.jl")
+include("Training/ML/SplineRegressor.jl")
 
-include("types.jl")
-include("utils.jl")
-include("train.jl")
-include("plot.jl")
+# Differential Equation support
+include("DiffEq/forward.jl")
+include("DiffEq/inverse.jl")
 
-# Python libraries 
-const mpl_base::PyObject = isdefined(SphereUDE, :mpl_base) ? SphereUDE.mpl_base : PyNULL()
-const mpl_colors::PyObject = isdefined(SphereUDE, :mpl_colors) ? SphereUDE.mpl_colors : PyNULL()
-const mpl_colormap::PyObject = isdefined(SphereUDE, :mpl_colormap) ? SphereUDE.mpl_colormap : PyNULL()
-const sns::PyObject = isdefined(SphereUDE, :sns) ? SphereUDE.sns : PyNULL()
-const ccrs::PyObject = isdefined(SphereUDE, :ccrs) ? SphereUDE.ccrs : PyNULL()
-const feature::PyObject = isdefined(SphereUDE, :feature) ? SphereUDE.feature : PyNULL()
+# Training utils
+include("Training/ML/numerical_utils.jl")
+include("Training/ML/AD.jl")
 
-include("setup/config.jl")
+# Losses and regularization
+include("Training/Regularization/quadrature_utils.jl")
+include("Training/Regularization/Regularization.jl")
+include("Training/Regularization/reg_utils.jl")
+include("Training/Regularization/reg_splines_utils.jl")
+include("Training/Loss/losses.jl")
+
+# Training
+include("Training/train.jl")
+include("Training/train_utils.jl")
+
+# Results
+include("Results/Results.jl")
+include("Results/result_utils.jl")
+
+# Uncertainty quantification
+include("Training/Sampling/bootstrap.jl")
+
+# Cross-validation
+include("Training/Validation/crossvalidation.jl")
+
+# Plotting
+include("Plot/plot.jl")
+
 
 end
